@@ -1,0 +1,151 @@
+## https://www.exceldemy.com/calculate-coordinates-from-bearing-and-distance-excel/
+##Step 1 - use the Scrape Legal Description for Text notebook in order to scrape out the legal descriptions - for this notebook, the direction and bearing and distance data into a spreadsheet the excel should have the following fields: Distance, NS (North, South) Degree, Minutes, Seconds, EW (West, East), Bearings in Radians, Latitude, Departure, Northing, Easting
+##Leave the first row blank except for Northing and Easting - fill in that first Row of Northing and Easting with your starting point
+##convert quadrant bearings to true bearings - https://mathsathome.com/calculating-bearings/formulas for true bearings:
+#Quadrant Bearing Conversion calculation True Bearing
+#N20°E 0° + 20° 020° #S70°E 180° – 70° 110° #S45°W 180° + 45° 225° #N60°W 360° – 60° 300° #reference: https://spreadsheetplanet.com/multiple-if-statements-in-excel/
+
+#Excel Formula
+#=IF(AND(EXACT(B3,"South"),EXACT(F3,"East")),(180-G3),IF(AND(EXACT(B3,"South"),EXACT(F3,"West")),(180+G3),IF(AND(EXACT(B3,"North"),EXACT(F3,"East")),(G3),IF(AND(EXACT(B3,"North"),EXACT(F3,"West")),(360-G3)))))¶
+
+#if you'd rather scrape data and do calculations in this notebook use this cell 
+# Import packages
+import os
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+#point the sample to the pathway for your spreadsheet
+sample = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\Sample_legaldescrptions.xlsx"
+
+# display your data
+#pd.read_excel(sample)
+
+#Calculate Decimal degrees (DD) field
+# Reference https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.ExcelWriter.html
+excel_file = pd.ExcelFile(sample) 
+df = excel_file.parse('rawdata') 
+#print(df)
+
+#show top few rows of data frame
+df.head()
+
+#Add column called truebearing and then calculate that field
+df['truebearing']= np.nan
+
+#calculate the Decimal Degrees, 'DD' Column
+#reference https://pythoninoffice.com/create-calculated-columns-in-a-dataframe/
+df['DD'] = df['Degree']+(df['Minutes']/60)+(df['Seconds']/3600)
+
+# convert quadrant bearings in Decimal Degrees - 'DD' - to true bearings - 
+#reference: https://mathsathome.com/calculating-bearings/
+
+#formulas for true bearings: 
+#Quadrant Bearing	Conversion calculation	True Bearing
+#N20°E	0° + 20°	020°
+#S70°E	180° – 70°	110°
+#S45°W	180° + 45°	225°
+#N60°W	360° – 60°	300°
+#reference: https://spreadsheetplanet.com/multiple-if-statements-in-excel/
+
+# Excel Formula 
+#  =IF(AND(EXACT(B3,"South"),EXACT(F3,"East")),(180-G3),IF(AND(EXACT(B3,"South"),EXACT(F3,"West")),(180+G3),IF(AND(EXACT(B3,"North"),EXACT(F3,"East")),(G3),IF(AND(EXACT(B3,"North"),EXACT(F3,"West")),(360-G3)))))
+
+#REFERENCE https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.apply.html
+def conditions(df):
+    if (df['NS']=='South') and (df['EW'] == 'East'): 
+        return (180-df['DD']) 
+    elif (df['NS']=='South') and (df['EW'] == 'West'): 
+        return (180+df['DD'])
+    elif (df['NS']=='North') and (df['EW'] == 'East'): 
+        return (df['DD'])
+    elif (df['NS']=='North') and (df['EW'] == 'West'): 
+        return (360-df['DD'])
+
+df['truebearing']=df.apply(conditions, axis = 1)
+
+df.head()
+
+#calculate the Radians Column using numpy
+#reference https://numpy.org/doc/stable/reference/generated/numpy.deg2rad.html
+
+import numpy as np 
+import math 
+df['Bearing in Radians'] = np.deg2rad(df['truebearing'])
+
+df.head()
+
+#numpy reference for cosine and sin functions https://numpy.org/doc/stable/reference/generated/numpy.sin.html
+
+#calculate Latitude
+# Excel Formula =A3*COS(I3)
+df['Latitude'] = df['Distance']*np.cos(df['Bearing in Radians'])
+
+#calculate Departure
+# Excel Formula =A3*SIN(I3)
+df['Departure'] = df['Distance']*np.sin(df['Bearing in Radians'])
+
+df.head()
+
+#calculate Northings and Eastings
+
+# Excel formula =J3+L2 = ['Latitude']+[previouse 'Northing' value]
+#Excel formala for Easting = ['Departure']+[previous Easting value]
+
+
+#https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.shift.html
+#rather than referencing the previous cell as you would in excel in order
+#to incrementally add Latitudes, the solution here is to use cumsum
+#this will require entering the first Northing into the formula manually
+#Reference - cumsum - https://stackoverflow.com/questions/41859311/cumsum-as-a-new-column-in-an-existing-pandas-dataframe
+#pandas doc - https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.cumsum.html
+
+
+df['Northings_cum']=151651.948+df['Latitude'].cumsum()
+
+df['Eastings_cum'] = 1016284.67+df['Departure'].cumsum()
+    
+
+df.head()
+
+df.dtypes
+csvpath = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\out1.csv"
+fc_path = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\LongIsland"
+outFC = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\LongIsland/points"
+gdbpath = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb"
+
+#REFERENCE - https://pro.arcgis.com/en/pro-app/latest/tool-reference/conversion/table-to-table.htm
+
+#convert df to csv, then convert csv to table
+df.to_csv(csvpath)
+
+#arcpy.conversion.TableToTable(in_rows, out_path, out_name, {where_clause}, {field_mapping}, {config_keyword})
+
+arcpy.conversion.TableToTable(csvpath,gdbpath,"table1")
+
+#use distance and bearing line tool
+#REFERENCE - https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/bearing-distance-to-line.htm
+
+
+intable = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\table1"
+verts = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\verts2"
+
+#xy table to point ref - https://pro.arcgis.com/en/pro-app/latest/tool-reference/data-management/xy-table-to-point.htm
+#https://pro.arcgis.com/en/pro-app/latest/arcpy/classes/spatialreference.htm
+
+sr = arcpy.Describe(fc_path).SpatialReference
+print(sr.name)
+
+arcpy.management.XYTableToPoint(intable, verts, 'Eastings_cum','Northings_cum',"",sr.name)
+
+startpoint = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\startpoint"
+allpoints = r"C:\Users\hdean\Documents\ArcGIS\Projects\PythonWorkSpace_ROW\MyProject43.gdb\allpoints"
+
+#map starting point
+arcpy.management.XYTableToPoint(intable, startpoint, 'Easting','Northing',"",sr.name)
+
+import arcpy
+arcpy.Merge_management([verts, startpoint],allpoints)
+
+                 
